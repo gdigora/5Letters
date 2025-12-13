@@ -10,6 +10,8 @@ Entry point for Render.com deployment.
 
 import logging
 import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from dotenv import load_dotenv
 
 from telegram import Update
@@ -191,9 +193,36 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.error(f"Update {update} caused error {context.error}")
 
 
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    """Simple HTTP handler for Render.com health checks."""
+
+    def do_GET(self):
+        """Respond to GET requests."""
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'5Letters bot is running!')
+
+    def log_message(self, format, *args):
+        """Suppress HTTP server logs."""
+        pass
+
+
+def run_health_server(port):
+    """Run HTTP server for health checks in background thread."""
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    logger.info(f"Health check server listening on port {port}")
+    server.serve_forever()
+
+
 def main():
     """Start the bot."""
     logger.info("Starting 5Letters bot...")
+
+    # Start health check server for Render.com (in background thread)
+    port = int(os.getenv('PORT', 10000))  # Render.com provides PORT env var
+    health_thread = threading.Thread(target=run_health_server, args=(port,), daemon=True)
+    health_thread.start()
 
     # Create application
     application = Application.builder().token(TELEGRAM_TOKEN).build()
