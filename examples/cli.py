@@ -58,13 +58,11 @@ Examples:
         choices=["freq", "alpha", "none"],
         help="Sort results (freq=frequency, alpha=alphabetical, none=original order)"
     )
-    p.add_argument(
-        "args",
-        nargs="*",
-        help="Search parameters (-abc +def __w__ 1z)"
-    )
 
-    return p.parse_args()
+    # Use parse_known_args to handle -abc style arguments
+    known_args, remaining = p.parse_known_args()
+    known_args.args = remaining
+    return known_args
 
 
 def main():
