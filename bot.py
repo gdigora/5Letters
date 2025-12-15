@@ -10,6 +10,8 @@ Uses webhook mode for Render.com deployment.
 
 import logging
 import os
+
+from aiohttp import web
 from dotenv import load_dotenv
 
 from telegram import Update
@@ -191,6 +193,37 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.error(f"Update {update} caused error {context.error}")
 
 
+async def health(request):
+    """Health check endpoint for Render.com."""
+    return web.Response(text="OK")
+
+
+async def webhook(request):
+    """Handle incoming Telegram updates."""
+    application = request.app['bot_app']
+    update = Update.de_json(await request.json(), application.bot)
+    await application.process_update(update)
+    return web.Response()
+
+
+async def on_startup(app):
+    """Initialize bot on startup."""
+    application = app['bot_app']
+    await application.initialize()
+    await application.start()
+
+    webhook_url = app['webhook_url']
+    await application.bot.set_webhook(webhook_url)
+    logger.info(f"Webhook set to {webhook_url}")
+
+
+async def on_shutdown(app):
+    """Cleanup on shutdown."""
+    application = app['bot_app']
+    await application.stop()
+    await application.shutdown()
+
+
 def main():
     """Start the bot."""
     logger.info("Starting 5Letters bot...")
@@ -203,26 +236,31 @@ def main():
         logger.error("RENDER_EXTERNAL_URL not set! Are you running on Render.com?")
         exit(1)
 
-    # Create application
+    # Create PTB application
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
     # Register handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_words))
-
-    # Register error handler
     application.add_error_handler(error_handler)
 
-    # Start bot (webhook mode)
+    # Create aiohttp web app
+    app = web.Application()
+    app['bot_app'] = application
+    app['webhook_url'] = webhook_url
+
+    # Routes
+    app.router.add_get('/health', health)
+    app.router.add_post('/', webhook)
+
+    # Lifecycle
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
+
+    # Start server
     logger.info(f"Bot starting with webhook at {webhook_url}")
-    application.run_webhook(
-        listen='0.0.0.0',
-        port=port,
-        url_path='/',
-        webhook_url=webhook_url,
-        allowed_updates=Update.ALL_TYPES,
-    )
+    web.run_app(app, host='0.0.0.0', port=port)
 
 
 if __name__ == '__main__':
